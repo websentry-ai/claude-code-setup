@@ -173,7 +173,7 @@ def prompt_for_var(var_name: str, description: str, required: bool = True) -> Op
     Returns:
         The value entered by the user, or None if skipped
     """
-    prompt = f"\nEnter {description} ({var_name})"
+    prompt = f"\nEnter {description}"
     if not required:
         prompt += " (optional, press Enter to skip)"
     prompt += ": "
@@ -314,12 +314,7 @@ def main():
     print("=" * 60)
     print("Claude Code - Environment Setup")
     print("=" * 60)
-    print("\nThis script will configure persistent environment variables")
-    print("so you can use Claude Code with your Unbound API key.\n")
     
-    # Prompt for API key (required)
-    print("🔑 API Key Setup")
-    print("-" * 60)
     api_key = None
     
     while True:
