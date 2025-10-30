@@ -8,9 +8,15 @@ import platform
 import subprocess
 import urllib.request
 import urllib.error
+import urllib.parse
 import json
 from pathlib import Path
 from typing import Tuple, Optional, Dict
+import argparse
+import threading
+import http.server
+import socketserver
+import socket
 
 
 def get_shell_rc_file() -> Path:
@@ -161,50 +167,62 @@ def set_env_var(var_name: str, value: str) -> Tuple[bool, str]:
         return False, f"Unsupported OS: {system}"
 
 
-def prompt_for_var(var_name: str, description: str, required: bool = True) -> Optional[str]:
+def remove_env_var_on_unix(var_name: str) -> bool:
     """
-    Prompt user for an environment variable value.
-    
-    Args:
-        var_name: Name of the variable
-        description: Description to show the user
-        required: Whether the variable is required
-    
-    Returns:
-        The value entered by the user, or None if skipped
+    Remove an environment variable export line from the user's shell rc file.
     """
-    prompt = f"\nEnter {description}"
-    if not required:
-        prompt += " (optional, press Enter to skip)"
-    prompt += ": "
-    
-    value = input(prompt).strip()
-    
-    if required and not value:
-        print(f"❌ {var_name} is required.")
-        return None
-    
-    return value if value else None
+    rc_file = get_shell_rc_file()
+    if rc_file is None:
+        return False
+    try:
+        rc_file.touch(exist_ok=True)
+        with open(rc_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        new_lines = []
+        removed = False
+        export_prefix = f"export {var_name}="
+        for line in lines:
+            if line.strip().startswith(export_prefix):
+                removed = True
+                continue
+            new_lines.append(line)
+        if removed:
+            with open(rc_file, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+        return True
+    except Exception as e:
+        print(f"❌ Failed to modify {rc_file}: {e}")
+        return False
 
 
-def prompt_yes_no(question: str, default: bool = True) -> bool:
+def remove_env_var_on_windows(var_name: str) -> bool:
     """
-    Prompt user for a yes/no question.
-    
-    Args:
-        question: Question to ask
-        default: Default value if user just presses Enter
-    
-    Returns:
-        True if yes, False if no
+    Remove a user environment variable on Windows by deleting it from HKCU\\Environment.
     """
-    default_text = "Y/n" if default else "y/N"
-    response = input(f"{question} ({default_text}): ").strip().lower()
-    
-    if not response:
-        return default
-    
-    return response in ["y", "yes"]
+    try:
+        subprocess.run(["reg", "delete", "HKCU\\Environment", "/F", "/V", var_name], check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        # If it doesn't exist, treat as success
+        return True
+    except FileNotFoundError:
+        print("❌ 'reg' command not found. Please remove the variable manually.")
+        return False
+
+
+def remove_env_var(var_name: str) -> Tuple[bool, str]:
+    """
+    Remove an environment variable permanently across OS platforms.
+    """
+    system = platform.system().lower()
+    if system == "windows":
+        success = remove_env_var_on_windows(var_name)
+        return (True, "Removed") if success else (False, f"Failed to remove {var_name}")
+    elif system in ["darwin", "linux"]:
+        success = remove_env_var_on_unix(var_name)
+        return (True, "Removed") if success else (False, f"Failed to remove {var_name}")
+    else:
+        return False, f"Unsupported OS: {system}"
 
 
 def verify_api_key(api_key: str) -> bool:
@@ -264,49 +282,119 @@ def verify_api_key(api_key: str) -> bool:
         return False
 
 
-def prompt_vertex_configuration() -> Dict[str, any]:
+def setup_claude_key_helper() -> None:
     """
-    Prompt user for Vertex AI configuration.
-    
-    Returns:
-        Dictionary with useVertex, model, and smallModel keys
+    Create ~/.claude/anthropic_key.sh that echoes UNBOUND_API_KEY and
+    update ~/.claude/settings.json with apiKeyHelper pointing to that script.
     """
-    print("\n" + "─" * 60)
-    print("🔄 Vertex AI Configuration")
-    print("─" * 60)
-    
-    use_vertex = prompt_yes_no("Do you want to use Vertex AI models?", default=False)
-    
-    if not use_vertex:
-        return {"useVertex": False}
-    
-    print("\n📝 Vertex AI Model Configuration:")
-    print("Default models:")
-    print("  • Primary model: claude-sonnet-4-5@20250929")
-    print("  • Small/fast model: claude-3-5-haiku@20241022")
-    print("")
-    
-    use_defaults = prompt_yes_no("Would you like to proceed with the default models?", default=True)
-    
-    primary_model = "anthropic.claude-sonnet-4-5@20250929"
-    small_model = "anthropic.claude-3-5-haiku@20241022"
-    
-    if not use_defaults:
-        print("\n📝 Enter custom Vertex AI model IDs:")
-        
-        custom_primary = input(f"Primary model (default: {primary_model}): ").strip()
-        if custom_primary:
-            primary_model = custom_primary
-        
-        custom_small = input(f"Small/fast model (default: {small_model}): ").strip()
-        if custom_small:
-            small_model = custom_small
-    
-    return {
-        "useVertex": True,
-        "model": primary_model,
-        "smallModel": small_model
-    }
+    claude_dir = Path.home() / ".claude"
+    settings_path = claude_dir / "settings.json"
+    key_helper_path = claude_dir / "anthropic_key.sh"
+
+    try:
+        claude_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write anthropic_key.sh
+        key_helper_path.write_text("echo $UNBOUND_API_KEY", encoding="utf-8")
+        try:
+            current_mode = key_helper_path.stat().st_mode
+            os.chmod(key_helper_path, current_mode | 0o111)
+        except Exception:
+            pass
+
+        # Read existing settings.json if present
+        settings: Dict[str, any] = {}
+        if settings_path.exists():
+            try:
+                settings = json.loads(settings_path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                settings = {}
+
+        # Update apiKeyHelper
+        settings["apiKeyHelper"] = "~/.claude/anthropic_key.sh"
+
+        settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        print("✅ Configured Claude Code key helper")
+    except Exception as e:
+        print(f"⚠️  Failed to configure Claude Code key helper: {e}")
+
+
+def run_one_shot_callback_server(frontend_url: str) -> Optional[Dict[str, any]]:
+    """
+    Start a local HTTP server that waits for a single callback request and returns its contents.
+    Returns a dict with method, path, query, headers, and body; or None on failure.
+    """
+    result: Dict[str, any] = {"method": None, "path": None, "query": None, "headers": None, "body": None}
+    done_evt = threading.Event()
+
+    class CallbackHandler(http.server.BaseHTTPRequestHandler):
+        def _finish(self, code: int = 200, message: bytes = b"Callback received. You can return to the terminal now.") -> None:
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(message)))
+                self.end_headers()
+                self.wfile.write(message)
+            except Exception:
+                pass
+
+        def do_GET(self) -> None:
+            parsed = urllib.parse.urlparse(self.path)
+            result["method"] = "GET"
+            result["path"] = self.path
+            result["query"] = dict(urllib.parse.parse_qsl(parsed.query))
+            result["headers"] = {k: v for k, v in self.headers.items()}
+            result["body"] = None
+            self._finish()
+            done_evt.set()
+
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            body = self.rfile.read(length) if length > 0 else b""
+            parsed = urllib.parse.urlparse(self.path)
+            result["method"] = "POST"
+            result["path"] = self.path
+            result["query"] = dict(urllib.parse.parse_qsl(parsed.query))
+            result["headers"] = {k: v for k, v in self.headers.items()}
+            result["body"] = body.decode("utf-8", errors="replace") if body else None
+            self._finish()
+            done_evt.set()
+
+        def log_message(self, format: str, *args) -> None:
+            return
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            host, port = s.getsockname()
+        callback_url = f"http://127.0.0.1:{port}/callback"
+
+        httpd = socketserver.TCPServer(("127.0.0.1", port), CallbackHandler)
+        httpd.allow_reuse_address = True
+
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+
+        encoded_callback = urllib.parse.quote(callback_url, safe="")
+        target_url = f"{frontend_url.rstrip('/')}/automations/api-key-callback?callback_url={encoded_callback}"
+        print("\n" + "─" * 60)
+        print("🔗 Click the following URL (or paste in your browser):")
+        print(target_url)
+        print("Waiting for the website to return to the terminal...")
+
+        try:
+            done_evt.wait()
+        finally:
+            try:
+                httpd.shutdown()
+                httpd.server_close()
+            except Exception:
+                pass
+
+        return result
+    except Exception as e:
+        print(f"❌ Failed to run callback server: {e}")
+        return None
 
 
 def main():
@@ -315,29 +403,46 @@ def main():
     print("Claude Code - Environment Setup")
     print("=" * 60)
     
+    # Flush previously set environment variables at start
+    for var_name in [
+        "ANTHROPIC_BASE_URL",
+        "UNBOUND_API_KEY"
+    ]:
+        try:
+            remove_env_var(var_name)
+        except Exception:
+            pass
+    
+    # Prompt user to initiate callback flow and print the response
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--domain", dest="domain", help="Base frontend URL (e.g., gateway.getunbound.ai)")
+    # tolerate unknown args so this script can be called from other tooling
+    args, _ = parser.parse_known_args()
+
+    if not args.domain:
+        print("\n❌ Missing required argument: --domain (e.g., --domain gateway.getunbound.ai)")
+        return
+
+    cb_response = run_one_shot_callback_server(args.domain)
+    if cb_response is None:
+        print("\n❌ Failed to receive callback response. Exiting.")
+        return
+
     api_key = None
+    try:
+        api_key = (cb_response.get("query") or {}).get("api_key")
+    except Exception:
+        api_key = None
+
+    if not api_key:
+        print("\n❌ No api_key found in callback. Exiting.")
+        return
+
+    if not verify_api_key(api_key):
+        print("❌ API key verification failed. Exiting.")
+        return
     
-    while True:
-        api_key = prompt_for_var(
-            "UNBOUND_API_KEY",
-            "Unbound API Key",
-            required=True
-        )
-        
-        if not api_key:
-            print("\n❌ API key is required. Exiting.")
-            return
-        
-        # Verify the API key
-        print("\nVerifying API key...")
-        if verify_api_key(api_key):
-            print("✅ API key verified successfully")
-            break
-        else:
-            retry = prompt_yes_no("\nWould you like to try again?", default=True)
-            if not retry:
-                return
-    
+    print("API Key Verified ✅")
     # Set API key environment variable
     print("\n" + "=" * 60)
     print("Setting Environment Variables")
@@ -350,34 +455,16 @@ def main():
         print(f"❌ Failed to configure UNBOUND_API_KEY: {message}")
         return
     
-    # Prompt for Vertex configuration
-    vertex_config = prompt_vertex_configuration()
+    print("\nSetting standard Unbound configuration...")
     
-    # Set additional environment variables based on configuration
-    if vertex_config.get("useVertex"):
-        # Vertex AI configuration
-        print("\nSetting Vertex AI environment variables...")
-        
-        env_vars = {
-            "ANTHROPIC_MODEL": vertex_config.get("model", "anthropic.claude-sonnet-4-5@20250929"),
-            "ANTHROPIC_SMALL_FAST_MODEL": vertex_config.get("smallModel", "anthropic.claude-3-5-haiku@20241022")
-        }
-        
-        for var_name, value in env_vars.items():
-            success, message = set_env_var(var_name, value)
-            if success:
-                print(f"✅ {var_name} configured")
-            else:
-                print(f"⚠️  {var_name}: {message}")
+    success, message = set_env_var("ANTHROPIC_BASE_URL", "https://api.getunbound.ai")
+    if success:
+        print(f"✅ ANTHROPIC_BASE_URL configured")
     else:
-        # Standard Unbound proxy configuration
-        print("\nSetting standard Unbound configuration...")
-        
-        success, message = set_env_var("ANTHROPIC_BASE_URL", "https://api.getunbound.ai")
-        if success:
-            print(f"✅ ANTHROPIC_BASE_URL configured")
-        else:
-            print(f"⚠️  ANTHROPIC_BASE_URL: {message}")
+        print(f"⚠️  ANTHROPIC_BASE_URL: {message}")
+    
+    # Configure Claude Code helper files
+    setup_claude_key_helper()
     
     # Final instructions
     print("\n" + "=" * 60)
