@@ -129,7 +129,7 @@ def set_env_var_on_unix(var_name: str, value: str) -> bool:
         return True
 
 
-def set_env_var_forever(var_name: str, value: str) -> Tuple[bool, str]:
+def set_env_var(var_name: str, value: str) -> Tuple[bool, str]:
     """
     Set an environment variable permanently across all OS platforms.
     
@@ -343,7 +343,7 @@ def main():
     print("Setting Environment Variables")
     print("=" * 60)
     
-    success, message = set_env_var_forever("UNBOUND_API_KEY", api_key)
+    success, message = set_env_var("UNBOUND_API_KEY", api_key)
     if success:
         print(f"✅ UNBOUND_API_KEY configured successfully")
     else:
@@ -364,7 +364,7 @@ def main():
         }
         
         for var_name, value in env_vars.items():
-            success, message = set_env_var_forever(var_name, value)
+            success, message = set_env_var(var_name, value)
             if success:
                 print(f"✅ {var_name} configured")
             else:
@@ -373,7 +373,7 @@ def main():
         # Standard Unbound proxy configuration
         print("\nSetting standard Unbound configuration...")
         
-        success, message = set_env_var_forever("ANTHROPIC_BASE_URL", "https://api.getunbound.ai")
+        success, message = set_env_var("ANTHROPIC_BASE_URL", "https://api.getunbound.ai")
         if success:
             print(f"✅ ANTHROPIC_BASE_URL configured")
         else:
