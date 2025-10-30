@@ -128,10 +128,8 @@ def set_env_var_on_unix(var_name: str, value: str) -> bool:
     was_added = append_to_file(rc_file, export_line)
     
     if was_added:
-        print(f"✅ Added {var_name} to {rc_file}")
         return True
     else:
-        print(f"ℹ️  {var_name} already configured in {rc_file}")
         return True
 
 
@@ -314,7 +312,6 @@ def setup_claude_key_helper() -> None:
         settings["apiKeyHelper"] = "~/.claude/anthropic_key.sh"
 
         settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-        print("✅ Configured Claude Code key helper")
     except Exception as e:
         print(f"⚠️  Failed to configure Claude Code key helper: {e}")
 
@@ -455,13 +452,7 @@ def main():
         print(f"❌ Failed to configure UNBOUND_API_KEY: {message}")
         return
     
-    print("\nSetting standard Unbound configuration...")
-    
     success, message = set_env_var("ANTHROPIC_BASE_URL", "https://api.getunbound.ai")
-    if success:
-        print(f"✅ ANTHROPIC_BASE_URL configured")
-    else:
-        print(f"⚠️  ANTHROPIC_BASE_URL: {message}")
     
     # Configure Claude Code helper files
     setup_claude_key_helper()
