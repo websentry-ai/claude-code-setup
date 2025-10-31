@@ -325,7 +325,7 @@ def run_one_shot_callback_server(frontend_url: str) -> Optional[Dict[str, any]]:
     done_evt = threading.Event()
 
     class CallbackHandler(http.server.BaseHTTPRequestHandler):
-        def _finish(self, code: int = 200, message: bytes = b"Callback received. You can return to the terminal now.") -> None:
+        def _finish(self, code: int = 200, message: bytes = b"Logged in successfully! You can close this tab and return to the terminal.") -> None:
             try:
                 self.send_response(code)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -440,15 +440,9 @@ def main():
         return
     
     print("API Key Verified ✅")
-    # Set API key environment variable
-    print("\n" + "=" * 60)
-    print("Setting Environment Variables")
-    print("=" * 60)
     
     success, message = set_env_var("UNBOUND_API_KEY", api_key)
-    if success:
-        print(f"✅ UNBOUND_API_KEY configured successfully")
-    else:
+    if not success:
         print(f"❌ Failed to configure UNBOUND_API_KEY: {message}")
         return
     
@@ -464,23 +458,13 @@ def main():
     
     system = platform.system().lower()
     if system in ["darwin", "linux"]:
-        shell_name = "zsh" if "zsh" in os.environ.get("SHELL", "") else "bash"
-        rc_file = ".zshrc" if shell_name == "zsh" else ".bashrc"
-        
-        print(f"\nTo apply the changes in your current terminal:")
-        print(f"  source ~/{rc_file}")
-        print(f"\nOr simply open a new terminal window.")
-    else:
-        print("\nTo apply the changes:")
-        print("  Close and reopen your terminal/command prompt")
-    
-    print("\n" + "=" * 60)
-    print("Next Steps:")
-    print("=" * 60)
-    print("\n1. Reload your terminal configuration (see above)")
-    print("2. Start using Claude Code with: claude")
-    print("\n" + "=" * 60)
-
+        try:
+            rc_path = get_shell_rc_file()
+            if rc_path is not None:
+                shell_path = os.environ.get("SHELL", "/bin/bash") or "/bin/bash"
+                subprocess.run([shell_path, "-lc", f"source '{rc_path}'"], check=False, capture_output=True)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     try:
@@ -490,4 +474,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ An error occurred: {e}")
         exit(1)
-
