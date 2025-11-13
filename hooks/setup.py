@@ -321,7 +321,9 @@ def configure_claude_settings() -> bool:
 
 
 def main():
-    print("Claude code setup")
+    print("=" * 60)
+    print("Claude Code Setup for Unbound Gateway")
+    print("=" * 60)
     
     domain = None
     for i, arg in enumerate(sys.argv):
@@ -365,8 +367,9 @@ def main():
         print("❌ Failed to configure Claude settings")
         return
     
-    print("API key added")
-    print("Setup complete")
+    print("✅ API key verified and added")
+    print("✅ Setup complete")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

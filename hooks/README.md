@@ -1,3 +1,4 @@
+# Claude Code Hooks for Unbound Gateway
 Run the command to setup Claude Code Hooks with Unbound:
 
 ```bash
