@@ -7,7 +7,6 @@ import platform
 import subprocess
 import urllib.request
 import urllib.parse
-import time
 import webbrowser
 from pathlib import Path
 from typing import Tuple, Optional, Dict
@@ -154,7 +153,7 @@ def run_callback_server(frontend_url: str) -> Optional[Dict[str, any]]:
         thread.start()
 
         encoded_callback = urllib.parse.quote(callback_url, safe="")
-        target_url = f"{frontend_url.rstrip('/')}/automations/api-key-callback?callback_url={encoded_callback}&app_type=claude"
+        target_url = f"{frontend_url.rstrip('/')}/automations/api-key-callback?callback_url={encoded_callback}&app_type=claude-code"
         print("\n" + "─" * 60)
         webbrowser.open(target_url)
         print("🌐 Opening browser...")
