@@ -292,13 +292,13 @@ def main():
         input_data = sys.stdin.read().strip()
         
         if not input_data:
-            print("{}")
+            print("{}", flush=True)
             return
         
         try:
             event = json.loads(input_data)
         except json.JSONDecodeError:
-            print("{}")
+            print("{}", flush=True)
             return
         
         timestamp = datetime.utcnow().isoformat() + 'Z'
@@ -318,10 +318,11 @@ def main():
         
         cleanup_old_logs()
         
-        print("{}")
+        print("{}", flush=True)
         
-    except Exception:
-        print("{}")
+    except Exception as e:
+        # Still return empty JSON object to Claude Code to indicate completion
+        print("{}", flush=True)
 
 
 if __name__ == '__main__':
