@@ -308,6 +308,10 @@ def setup_claude_key_helper() -> None:
             except Exception:
                 settings = {}
 
+        # Remove hooks if present before adding apiKeyHelper
+        if "hooks" in settings:
+            del settings["hooks"]
+
         # Update apiKeyHelper
         settings["apiKeyHelper"] = "~/.claude/anthropic_key.sh"
 
