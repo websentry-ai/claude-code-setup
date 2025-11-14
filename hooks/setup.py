@@ -112,6 +112,64 @@ def set_env_var(var_name: str, value: str) -> Tuple[bool, str]:
         return False, f"Unsupported OS: {system}"
 
 
+def remove_env_var_on_unix(var_name: str) -> bool:
+    """
+    Remove an environment variable export line from the user's shell rc file.
+    """
+    rc_file = get_shell_rc_file()
+    if rc_file is None:
+        return False
+    try:
+        rc_file.touch(exist_ok=True)
+        with open(rc_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        new_lines = []
+        removed = False
+        export_prefix = f"export {var_name}="
+        for line in lines:
+            if line.strip().startswith(export_prefix):
+                removed = True
+                continue
+            new_lines.append(line)
+        if removed:
+            with open(rc_file, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+        return True
+    except Exception as e:
+        print(f"❌ Failed to modify {rc_file}: {e}")
+        return False
+
+
+def remove_env_var_on_windows(var_name: str) -> bool:
+    """
+    Remove a user environment variable on Windows by deleting it from HKCU\\Environment.
+    """
+    try:
+        subprocess.run(["reg", "delete", "HKCU\\Environment", "/F", "/V", var_name], check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        # If it doesn't exist, treat as success
+        return True
+    except FileNotFoundError:
+        print("❌ 'reg' command not found. Please remove the variable manually.")
+        return False
+
+
+def remove_env_var(var_name: str) -> Tuple[bool, str]:
+    """
+    Remove an environment variable permanently across OS platforms.
+    """
+    system = platform.system().lower()
+    if system == "windows":
+        success = remove_env_var_on_windows(var_name)
+        return (True, "Removed") if success else (False, f"Failed to remove {var_name}")
+    elif system in ["darwin", "linux"]:
+        success = remove_env_var_on_unix(var_name)
+        return (True, "Removed") if success else (False, f"Failed to remove {var_name}")
+    else:
+        return False, f"Unsupported OS: {system}"
+
+
 def run_callback_server(frontend_url: str) -> Optional[Dict[str, any]]:
     result: Dict[str, any] = {"method": None, "path": None, "query": None, "headers": None, "body": None}
     done_evt = threading.Event()
@@ -219,6 +277,10 @@ def configure_claude_settings() -> bool:
         else:
             settings = {}
             settings_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Remove apiKeyHelper if present before adding hooks
+        if "apiKeyHelper" in settings:
+            del settings["apiKeyHelper"]
         
         hook_command = str(Path.home() / ".claude" / "hooks" / "unbound.py")
         
@@ -357,6 +419,12 @@ def main():
     if not success:
         print(f"❌ Failed to set environment variable: {message}")
         return
+    
+    # Remove ANTHROPIC_BASE_URL if it exists
+    try:
+        remove_env_var("ANTHROPIC_BASE_URL")
+    except Exception:
+        pass
     
     if not setup_hooks():
         print("❌ Failed to setup hooks")
